@@ -1,4 +1,3 @@
-# .github/workflows/build-project.yaml
 name: CI (Build)
 on:
   push:
@@ -14,12 +13,14 @@ jobs:
         run: |
           sudo add-apt-repository -y ppa:obsproject/obs-studio
           sudo apt-get update
+          # OBS SDK + Qt6 + build tools + (fixes XKB warning)
           sudo apt-get install -y \
             libobs-dev \
             qt6-base-dev qt6-base-dev-tools \
+            libxkbcommon-dev \
             cmake ninja-build build-essential
 
-      - name: Configure CMake
+      - name: Configure (system packages)
         run: |
           cmake -B build -S . -G Ninja \
             -DENABLE_FRONTEND_API=ON \
@@ -43,20 +44,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Use a maintained vcpkg action
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgTriplet: x64-osx
-
-      - name: Install dependencies via vcpkg
+      - name: Install prerequisites
         run: |
-          vcpkg install obs-studio[core] qtbase
+          brew update
+          brew install cmake ninja git
 
-      - name: Configure CMake (vcpkg toolchain)
+      - name: Get vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          ./vcpkg/bootstrap-vcpkg.sh
+
+      - name: Install deps via vcpkg
+        run: |
+          ./vcpkg/vcpkg install obs-studio[core]:x64-osx qtbase:x64-osx
+
+      - name: Configure (vcpkg toolchain)
         run: |
           cmake -B build -S . -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
             -DVCPKG_TARGET_TRIPLET=x64-osx \
             -DENABLE_FRONTEND_API=ON \
             -DENABLE_QT=ON \
@@ -80,27 +85,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Initialize the Visual Studio + Windows SDK environment
       - name: MSVC Dev Cmd
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgTriplet: x64-windows
-
-      - name: Install dependencies via vcpkg
+      - name: Install prerequisites
         shell: pwsh
         run: |
-          vcpkg install obs-studio[core] qtbase
+          choco install ninja -y
 
-      - name: Configure CMake (vcpkg toolchain)
+      - name: Get vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+
+      - name: Install deps via vcpkg
+        shell: pwsh
+        run: |
+          .\vcpkg\vcpkg.exe install obs-studio[core]:x64-windows qtbase:x64-windows
+
+      - name: Configure (vcpkg toolchain)
         shell: pwsh
         run: >
           cmake -B build -S . -G Ninja
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=x64-windows
           -DENABLE_FRONTEND_API=ON
           -DENABLE_QT=ON
