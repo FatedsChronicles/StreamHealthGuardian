@@ -74,4 +74,3 @@ install(TARGETS ${CMAKE_PROJECT_NAME} LIBRARY DESTINATION "${OBS_PLUGIN_INSTALL_
 install(DIRECTORY data/ DESTINATION "${OBS_PLUGIN_DATA_INSTALL_PATH}/${_name}")
 
 # Optional CPack if you want local packaging; CI will zip artifacts anyway
-include(CPack OPTIONAL)
