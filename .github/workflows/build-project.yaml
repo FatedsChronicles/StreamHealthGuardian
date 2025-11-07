@@ -1,58 +1,118 @@
+# .github/workflows/build-project.yaml
 name: CI (Build)
 on:
   push:
   pull_request:
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  ubuntu:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Install deps (simplified; adapt to your template/runner images)
-      - name: Setup Deps (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Add OBS PPA + install deps
         run: |
-          choco install ninja -y
-          echo "Ensure OBS SDK and Qt6 are available on runners or cache them."
-
-      - name: Setup Deps (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew update
-          brew install ninja cmake qt
-          echo "Ensure OBS SDK is available or preinstalled."
-
-      - name: Setup Deps (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
+          sudo add-apt-repository -y ppa:obsproject/obs-studio
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qtbase5-dev qt6-base-dev build-essential
+          # LibObs + frontend API + Qt6 dev
+          sudo apt-get install -y libobs-dev qt6-base-dev qt6-base-dev-tools cmake ninja-build build-essential
 
       - name: Configure
-        run: cmake -B build -S . -G Ninja -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON -DCMAKE_BUILD_TYPE=Release
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          # If CMake still can't find LibObs, uncomment the next line to help it:
+          # echo "LibObs cmake files:" && sudo find /usr -name LibObsConfig.cmake | head -n 10
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Package artifacts
+        run: |
+          mkdir -p artifacts
+          cp build/*.so artifacts/ || true
+        # upload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-artifacts
+          path: artifacts
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Use vcpkg to supply libobs + Qt
+      - name: Setup vcpkg
+        uses: microsoft/vcpkg-action@v1
+        with:
+          triplet: x64-osx
+
+      - name: Install deps via vcpkg
+        run: |
+          vcpkg install obs-studio[core] qtbase
+
+      - name: Configure (vcpkg toolchain)
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-osx \
+            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Package artifacts
+        run: |
+          mkdir -p artifacts
+          cp build/*.so artifacts/ || true
+          cp build/*.dylib artifacts/ || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: artifacts
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ensure VS and Windows SDK env are initialized
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup vcpkg
+        uses: microsoft/vcpkg-action@v1
+        with:
+          triplet: x64-windows
+
+      - name: Install deps via vcpkg
+        shell: pwsh
+        run: |
+          vcpkg install obs-studio[core] qtbase
+
+      - name: Configure (vcpkg toolchain)
+        shell: pwsh
+        run: |
+          cmake -B build -S . -G "Ninja" `
+            -DCMAKE_TOOLCHAIN_FILE="${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON `
+            -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release -j
 
       - name: Package artifacts
+        shell: pwsh
         run: |
-          mkdir -p artifacts
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp build/*.dll artifacts/ || true
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            cp build/*.so artifacts/ || true
-            cp build/*.dylib artifacts/ || true
-          else
-            cp build/*.so artifacts/ || true
-          fi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item build\*.dll artifacts -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ runner.os }}-artifacts
+          name: windows-artifacts
           path: artifacts
