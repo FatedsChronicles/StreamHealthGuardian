@@ -1,0 +1,58 @@
+name: CI (Build)
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install deps (simplified; adapt to your template/runner images)
+      - name: Setup Deps (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ninja -y
+          echo "Ensure OBS SDK and Qt6 are available on runners or cache them."
+
+      - name: Setup Deps (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install ninja cmake qt
+          echo "Ensure OBS SDK is available or preinstalled."
+
+      - name: Setup Deps (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build qtbase5-dev qt6-base-dev build-essential
+
+      - name: Configure
+        run: cmake -B build -S . -G Ninja -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Package artifacts
+        run: |
+          mkdir -p artifacts
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp build/*.dll artifacts/ || true
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            cp build/*.so artifacts/ || true
+            cp build/*.dylib artifacts/ || true
+          else
+            cp build/*.so artifacts/ || true
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-artifacts
+          path: artifacts

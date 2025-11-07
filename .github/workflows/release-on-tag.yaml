@@ -1,0 +1,31 @@
+name: Release (Tag)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON
+
+      - name: Build (Linux)
+        run: cmake --build build -j
+
+      - name: Create zips
+        run: |
+          mkdir -p dist/linux
+          cp build/*.so dist/linux/ || true
+          zip -r stream-health-guardian-${GITHUB_REF_NAME}-linux.zip dist/linux || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            stream-health-guardian-${{ github.ref_name }}-linux.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
