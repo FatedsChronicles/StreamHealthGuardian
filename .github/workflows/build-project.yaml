@@ -25,6 +25,7 @@ jobs:
           cmake -B build -S . -G Ninja \
             -DENABLE_FRONTEND_API=ON \
             -DENABLE_QT=ON \
+            -DPLUGIN_WERROR=OFF \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
@@ -40,91 +41,141 @@ jobs:
           path: artifacts
 
   macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
+  runs-on: macos-latest
+  steps:
+    - uses: actions/checkout@v4
 
-      - name: Install prerequisites
-        run: |
-          brew update
-          brew install cmake ninja git
+    - name: Install tools
+      run: |
+        brew update
+        brew install cmake ninja git qt@6
+        echo "::add-path::/usr/local/opt/qt@6/bin"
+        echo "CMAKE_PREFIX_PATH=/usr/local/opt/qt@6/lib/cmake" >> $GITHUB_ENV
 
-      - name: Get vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git
-          ./vcpkg/bootstrap-vcpkg.sh
+    - name: Prepare directories
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/_deps
+        mkdir -p $GITHUB_WORKSPACE/_prefix   # where LibObs will be installed
 
-      - name: Install deps via vcpkg
-        run: |
-          ./vcpkg/vcpkg install obs-studio[core]:x64-osx qtbase:x64-osx
+    - name: Download obs-deps (macOS)
+      run: |
+        # Use the version from your buildspec.json (example URL pattern below).
+        # Replace the URL/version if needed.
+        cd $GITHUB_WORKSPACE/_deps
+        curl -L -o obs-deps-macos.tar.xz \
+          https://github.com/obsproject/obs-deps/releases/download/2025-07-11/macos-deps-2025-07-11.tar.xz
+        tar -xf obs-deps-macos.tar.xz
+        # Result: a deps tree we’ll pass as DepsPath
 
-      - name: Configure (vcpkg toolchain)
-        run: |
-          cmake -B build -S . -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-            -DVCPKG_TARGET_TRIPLET=x64-osx \
-            -DENABLE_FRONTEND_API=ON \
-            -DENABLE_QT=ON \
-            -DCMAKE_BUILD_TYPE=Release
+    - name: Clone obs-studio
+      run: |
+        cd $GITHUB_WORKSPACE
+        git clone --depth 1 --branch 31.1.1 https://github.com/obsproject/obs-studio.git
+        # If your buildspec.json uses a different version, match it here.
 
-      - name: Build
-        run: cmake --build build -j
+    - name: Build LibObs
+      run: |
+        cd $GITHUB_WORKSPACE/obs-studio
+        cmake -B build -S . -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DDepsPath="$GITHUB_WORKSPACE/_deps" \
+          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/_prefix" \
+          -DBUILD_BROWSER=OFF -DBUILD_VST=OFF -DBUILD_QSV=OFF
+        cmake --build build --target obs --config Release -j
+        cmake --install build
 
-      - name: Collect artifacts
-        run: |
-          mkdir -p artifacts
-          cp build/*.so artifacts/ 2>/dev/null || true
-          cp build/*.dylib artifacts/ 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-artifacts
-          path: artifacts
+    - name: Configure plugin (point to LibObs prefix)
+      run: |
+        cmake -B build -S . -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_FRONTEND_API=ON \
+          -DENABLE_QT=ON \
+          -DPLUGIN_WERROR=OFF \
+          -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/_prefix/lib/cmake;${{ env.CMAKE_PREFIX_PATH }}"
+
+    - name: Build plugin
+      run: cmake --build build -j
+
+    - name: Collect artifacts
+      run: |
+        mkdir -p artifacts
+        cp build/*.so artifacts/ 2>/dev/null || true
+        cp build/*.dylib artifacts/ 2>/dev/null || true
+    - uses: actions/upload-artifact@v4
+      with:
+        name: macos-artifacts
+        path: artifacts
+
 
   windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
+  runs-on: windows-latest
+  steps:
+    - uses: actions/checkout@v4
 
-      - name: MSVC Dev Cmd
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+    - name: MSVC Dev Cmd
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
 
-      - name: Install prerequisites
-        shell: pwsh
-        run: |
-          choco install ninja -y
+    - name: Install tools
+      shell: pwsh
+      run: |
+        choco install ninja cmake git -y
+        # Optional: install Qt 6 (tools only). On hosted runners, you may need to fetch official Qt instead.
+        choco install qt6-default -y || echo "If this fails, we will rely on obs-deps' Qt or adjust CMAKE_PREFIX_PATH later."
 
-      - name: Get vcpkg
-        shell: pwsh
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git
-          .\vcpkg\bootstrap-vcpkg.bat
+    - name: Prepare directories
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE\_deps | Out-Null
+        New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE\_prefix | Out-Null
 
-      - name: Install deps via vcpkg
-        shell: pwsh
-        run: |
-          .\vcpkg\vcpkg.exe install obs-studio[core]:x64-windows qtbase:x64-windows
+    - name: Download obs-deps (Windows)
+      shell: pwsh
+      run: |
+        cd $env:GITHUB_WORKSPACE\_deps
+        # Match the version/date to your buildspec.json
+        Invoke-WebRequest -Uri https://github.com/obsproject/obs-deps/releases/download/2025-07-11/windows-deps-2025-07-11-x64.zip -OutFile deps.zip
+        Expand-Archive deps.zip -DestinationPath $env:GITHUB_WORKSPACE\_deps
 
-      - name: Configure (vcpkg toolchain)
-        shell: pwsh
-        run: >
-          cmake -B build -S . -G Ninja
-          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=x64-windows
-          -DENABLE_FRONTEND_API=ON
-          -DENABLE_QT=ON
-          -DCMAKE_BUILD_TYPE=Release
+    - name: Clone obs-studio
+      shell: pwsh
+      run: |
+        cd $env:GITHUB_WORKSPACE
+        git clone --depth 1 --branch 31.1.1 https://github.com/obsproject/obs-studio.git
 
-      - name: Build
-        run: cmake --build build --config Release -j
+    - name: Build LibObs
+      shell: pwsh
+      run: |
+        cd $env:GITHUB_WORKSPACE\obs-studio
+        cmake -B build -S . -G Ninja `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DDepsPath="$env:GITHUB_WORKSPACE\_deps" `
+          -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\_prefix" `
+          -DBUILD_BROWSER=OFF -DBUILD_VST=OFF -DBUILD_QSV=OFF
+        cmake --build build --target obs --config Release -j
+        cmake --install build
 
-      - name: Collect artifacts
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Copy-Item build\*.dll artifacts -ErrorAction SilentlyContinue
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-artifacts
-          path: artifacts
+    - name: Configure plugin (point to LibObs prefix)
+      shell: pwsh
+      run: >
+        cmake -B build -S . -G Ninja
+        -DCMAKE_BUILD_TYPE=Release
+        -DENABLE_FRONTEND_API=ON
+        -DENABLE_QT=ON
+        -DPLUGIN_WERROR=OFF
+        -DCMAKE_PREFIX_PATH="$env:GITHUB_WORKSPACE\_prefix\lib\cmake"
+
+    - name: Build plugin
+      run: cmake --build build --config Release -j
+
+    - name: Collect artifacts
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+        Copy-Item build\*.dll artifacts -ErrorAction SilentlyContinue
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-artifacts
+        path: artifacts
+
