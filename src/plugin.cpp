@@ -1,5 +1,6 @@
 #include <obs-module.h>
 #include <obs-frontend-api.h>
+#include <QWidget>
 #include "version.hpp"
 #include "logging.hpp"
 #include "health_dock.hpp"
@@ -12,7 +13,9 @@ OBS_MODULE_USE_DEFAULT_LOCALE("StreamHealthGuardian", "en-US")
 
 MODULE_EXPORT const char* obs_module_description(void) { return SHG_DESCRIPTION; }
 
-static QWidget* g_dock_widget = nullptr;
+static QWidget* g_dock_widget = nullptr;           // keep a pointer to delete on unload
+static const char* SHG_DOCK_ID = "streamhealthguardian_dock";
+
 static obs_source_info* g_overlay = nullptr;
 static Hotkeys g_hotkeys;
 
@@ -38,16 +41,17 @@ bool obs_module_load(void)
   auto* dock = new HealthDock();
   dock->start();
   g_dock_widget = dock;
-  obs_frontend_add_dock(dock, obs_module_text("SHG.DockTitle"));
+  // Add dock by id + title + widget (required by current frontend API)
+  obs_frontend_add_dock(SHG_DOCK_ID, obs_module_text("SHG.DockTitle"), dock);
 
   // Hook up properties on the module as a pseudo "settings owner"
-  obs_module_set_config_path(NULL); // using default module config dir
-  obs_module_set_website(NULL);
+  obs_module_set_config_path(nullptr); // using default module config dir
+  obs_module_set_website(nullptr);
 
   register_hotkeys(g_hotkeys);
   register_frontend_events();
 
-  // Expose a property page via module settings menu (appears under Tools -> Scripts style)
+  // Expose a property page via module settings menu
   obs_module_set_create_properties(shg_properties, dock);
   obs_module_set_update(shg_update, dock);
 
@@ -57,7 +61,8 @@ bool obs_module_load(void)
 void obs_module_unload(void)
 {
   if (g_dock_widget) {
-    obs_frontend_remove_dock(g_dock_widget);
+    // Remove by id (API expects const char* id, not QWidget*)
+    obs_frontend_remove_dock(SHG_DOCK_ID);
     delete g_dock_widget;
     g_dock_widget = nullptr;
   }
