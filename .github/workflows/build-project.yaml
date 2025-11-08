@@ -69,10 +69,21 @@ jobs:
 
       - name: Download obs-deps (macOS)
         run: |
+          set -e
           cd "$GITHUB_WORKSPACE/_deps"
-          curl -fL -o macos-deps.tar.xz \
-            "https://github.com/obsproject/obs-deps/releases/download/${OBS_DEPS_DATE}/macos-deps-${OBS_DEPS_DATE}.tar.xz"
+          # Try the two common naming patterns:
+          URL1="https://github.com/obsproject/obs-deps/releases/download/${OBS_DEPS_DATE}/macos-deps-${OBS_DEPS_DATE}.tar.xz"
+          URL2="https://github.com/obsproject/obs-deps/releases/download/${OBS_DEPS_DATE}/macos-${OBS_DEPS_DATE}.tar.xz"
+          echo "Trying $URL1"
+          if curl -fL -o macos-deps.tar.xz "$URL1"; then
+            echo "Downloaded $URL1"
+          else
+            echo "Trying $URL2"
+            curl -fL -o macos-deps.tar.xz "$URL2"
+            echo "Downloaded $URL2"
+          fi
           tar -xf macos-deps.tar.xz
+
 
       - name: Clone obs-studio
         run: |
@@ -123,10 +134,10 @@ jobs:
         with:
           arch: x64
 
-      - name: Install tools (ninja, cmake, python)
+      - name: Install tools (ninja, cmake, python, Windows SDK)
         shell: pwsh
         run: |
-          choco install ninja cmake git python --no-progress -y
+          choco install ninja cmake git python windows-sdk-10.1 --no-progress -y
 
       - name: Install Qt 6 via aqtinstall (Windows)
         shell: pwsh
@@ -180,6 +191,7 @@ jobs:
           -DENABLE_QT=ON
           -DPLUGIN_WERROR=OFF
           -DCMAKE_PREFIX_PATH="$env:GITHUB_WORKSPACE\_prefix\lib\cmake;$env:QT_CMAKE_WIN"
+          -DCMAKE_SYSTEM_VERSION=10.0
 
       - name: Build plugin
         run: cmake --build build --config Release -j

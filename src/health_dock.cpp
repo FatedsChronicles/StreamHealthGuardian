@@ -53,7 +53,7 @@ void HealthDock::tick_rules(const StreamMetrics& m) {
   rules.add_rule({
     "DownshiftOnDrops",
     [t=rules.thresholds()](const StreamMetrics& sm){ return sm.dropped_frame_percent >= t.downshift_drop_percent; },
-    [this](const StreamMetrics&, ActionCtx& ctx){
+    [this](const StreamMetrics&, ActionCtx& /*ctx*/){
       if (ui.downshift.policy == DownshiftPolicy::Confirm) {
         blog(LOG_INFO, "[StreamHealthGuardian] Downshift suggested (Confirm policy)");
         // In a later iteration, present a confirm dialog; for now, log only.
